@@ -72,7 +72,7 @@ cd multiuser
 # 1) 配置
 cp .env.example .env
 vi .env                         # 至少改这三项：
-#   ADMIN_PASSWORD      上游后台密码（强口令）
+#   ADMIN_PASSWORD      上游后台密码（强口令，首次启动由 entrypoint 自动设置）
 #   UPSTREAM_KEY        上游 API Key（openssl rand -hex 24）
 #   ADMIN_TOKEN         网关管理令牌（openssl rand -hex 16）
 
@@ -88,7 +88,7 @@ docker compose exec gateway python gateway.py user add alice \
 #    后台只绑了回环，用 SSH 隧道进：
 ssh -L 3457:127.0.0.1:3457 user@your-server
 #    然后本机浏览器打开 http://127.0.0.1:3457/admin/
-#    - 访问设置 → 管理后台密码 → 填 ADMIN_PASSWORD
+#    - 登录密码就是 .env 里的 ADMIN_PASSWORD（entrypoint 已自动设好，无需手填）
 #    - 账号管理 → 导入账号（OAuth 或 refreshToken）
 #    - 设置 → 生成 API 密钥 → 复制出来填回 .env 的 UPSTREAM_KEY
 docker compose up -d            # 让网关拿到 UPSTREAM_KEY
@@ -166,7 +166,10 @@ cd stack && TEST_KEY=xk-... ./verify-stack.sh
 ## 六、安全清单（公网必做）
 
 1. **上游 3457 只绑 `127.0.0.1`**，或直接不映射端口、只让 compose 内部网络访问
-2. **一定要设上游后台密码**（`ADMIN_PASSWORD`），否则 `/admin/` 裸奔
+2. **一定要设上游后台密码**（`ADMIN_PASSWORD`）—— 上游**不读**这个环境变量，
+   而是由 compose 的 entrypoint 在启动后调用 `/admin/api/password` 写入
+   `.cline-accounts.json`。不设的话 entrypoint 会在日志里打警告，且 `/admin/` 无鉴权。
+   验证：`curl -o /dev/null -w '%{http_code}' http://127.0.0.1:3457/admin/api/stats` 应为 **401**
 3. **网关用 `AUTH_MODE=key`** 强制鉴权（`auto` 只适合"先平滑切换"的过渡期）
 4. **HTTPS**：用 `stack/Caddyfile`，注意 `flush_interval -1`（否则 SSE 被攒批）
 5. **`data/` 加进 `.gitignore`**，权限 `chmod 600 data/upstream/.cline-accounts.json`（明文 refreshToken）

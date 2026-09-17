@@ -57,11 +57,37 @@ services:
         for f in .cline-accounts.json .cline-request-logs.json .cline-config.json .cline-zen.json .cline-credentials.json override.md; do
           [ -e "/data/$$f" ] || install -m 600 /dev/null "/data/$$f"
         done
-        exec /app/cline-proxy -host 0.0.0.0 -port 3457
+        # 后台启动上游
+        /app/cline-proxy -host 0.0.0.0 -port 3457 &
+        UP_PID=$$!
+        # 自动设置管理后台密码。
+        # 注意：上游**不读** ADMIN_PASSWORD 环境变量，只认 /admin/api/password
+        # 接口写入 .cline-accounts.json 的 adminPasswordHash（见 admin.go
+        # setAdminPassword）。不调用它的话后台就是无鉴权状态 —— 曾踩过这个坑。
+        # 该接口在"尚未设密码"时放行，所以首次启动能设置；已设过则返回 401，
+        # 属于幂等，忽略即可。
+        if [ -n "$${ADMIN_PASSWORD:-}" ]; then
+          for i in $$(seq 1 30); do
+            if wget -q -O /dev/null http://127.0.0.1:3457/health 2>/dev/null; then break; fi
+            sleep 1
+          done
+          BODY=$$(printf '{"password":"%s"}' "$$ADMIN_PASSWORD")
+          if wget -q -O - --header='Content-Type: application/json' \
+               --post-data="$$BODY" http://127.0.0.1:3457/admin/api/password 2>/dev/null | grep -q '"success":true'; then
+            echo "[entrypoint] 管理后台密码已设置"
+          else
+            echo "[entrypoint] 管理后台密码设置跳过（可能已设置过）"
+          fi
+        else
+          echo "[entrypoint] 警告：未提供 ADMIN_PASSWORD，管理后台处于无鉴权状态！"
+        fi
+        wait $$UP_PID
     environment:
       - PORT=3457
       - CLINE_PROXY_HOST=0.0.0.0
       - TZ=${TZ:-Asia/Shanghai}
+      # 上游本身不读这个变量；由上面的 entrypoint 调用 admin API 设置后台密码
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
     logging:
       driver: json-file
       options:
