@@ -88,6 +88,7 @@ Model   : deepseek-v4-flash-free     # 或 /v1/models 里的任意一个
 | `gateway/Dockerfile` | 网关镜像（python:3.12-alpine） |
 | `upstream/Dockerfile.gw` | 上游构建用（+GOPROXY，去掉匿名卷声明） |
 | `Caddyfile` | HTTPS 反代（`flush_interval -1` 保证 SSE 实时；后台按 IP 白名单） |
+| `nginx/` | HTTPS 反代（nginx 版，按路径分流：`/admin/`→上游、`/v1/`→网关，含登录限流） |
 | `verify-stack.sh` | 部署后冒烟（含"上游端口是否意外对公网开放"探测、明文凭据权限检查） |
 | `systemd/cline2api.service` | 裸机跑网关 + docker 跑上游的方案 |
 | `tests/run-all.sh` | 一键跑下面全部本地检查（不需要 Docker / 不联网） |
