@@ -53,10 +53,24 @@ echo "== 4. 传一个真 Key 试（可选）=="
 if [ -n "${TEST_KEY:-}" ]; then
   C="$(code -X POST "$GW/v1/chat/completions" -H "Authorization: Bearer $TEST_KEY" -H 'Content-Type: application/json' \
         -d '{"model":"big-pickle","messages":[{"role":"user","content":"ping"}],"max_tokens":8}')"
-  if [ "$C" = "200" ]; then ok "真 Key 调用成功（200）"; else bad "真 Key 调用失败" "$C"; fi
+  if [ "$C" = "200" ]; then
+    ok "真 Key 调用成功（200）"
+  elif [ "$C" = "401" ]; then
+    # 401 有两种来源：网关鉴权失败，或上游账号池为空。
+    # 查上游 /health 的 activeAccounts 区分，避免误报成"网关有问题"。
+    AC="$(curl -s -m 10 "$UP/health" | sed -n 's/.*"activeAccounts":\([0-9]*\).*/\1/p')"
+    if [ "${AC:-0}" = "0" ]; then
+      bad "真 Key 调用 401 —— 上游 Cline 账号池为空" \
+          "网关鉴权正常，是上游没有可用账号。去 http://127.0.0.1:3457/admin/ 导入账号（SSH 隧道进）后重跑"
+    else
+      bad "真 Key 调用失败（网关 401）" "Key 可能无效/被禁用/已过期；用 gateway.py whoami 反查"
+    fi
+  else
+    bad "真 Key 调用失败" "$C"
+  fi
   C="$(code -X POST "$GW/v1/chat/completions" -H "Authorization: Bearer $TEST_KEY" -H 'Content-Type: application/json' \
         -d '{"model":"big-pickle","messages":[{"role":"user","content":"ping"}],"stream":true,"max_tokens":8}')"
-  if [ "$C" = "200" ]; then ok "流式调用成功（200）"; else bad "流式调用失败" "$C"; fi
+  if [ "$C" = "200" ]; then ok "流式调用成功（200）"; else bad "流式调用失败" "$C（同上，先确认上游账号池非空）"; fi
 else
   printf '  SKIP  未设置 TEST_KEY，跳过真实调用（用法: TEST_KEY=xk-... ./verify-stack.sh）\n'
 fi

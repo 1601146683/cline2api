@@ -42,13 +42,20 @@ services:
       # 让 resolveDataPath()（exe目录 -> cwd -> ~/.cline2api）稳定命中 cwd=/data
       - ./data/upstream:/data
     working_dir: /data
+    # 注意：compose 的 command/entrypoint 里会把 $VAR 当插值变量展开，
+    # shell 变量必须写成 $$VAR（compose 会转义成 $VAR 交给 shell）。
+    # 之前这里写成 $f 导致 "[ -e "/data/$f" ]" 被渲染成 "[ -e "/data/" ]"，
+    # 整个"补齐空数据文件"的逻辑静默失效 —— 属于踩过的坑，勿改回单 $。
+    #
+    # 用 install -m 600 而不是 `: >`：顺带把权限设成 600（含明文 refreshToken），
+    # 且 install 对已存在文件是幂等的（不会清空已有数据）。
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
         set -e
         mkdir -p /data
         for f in .cline-accounts.json .cline-request-logs.json .cline-config.json .cline-zen.json .cline-credentials.json override.md; do
-          [ -e "/data/$f" ] || : > "/data/$f"
+          [ -e "/data/$$f" ] || install -m 600 /dev/null "/data/$$f"
         done
         exec /app/cline-proxy -host 0.0.0.0 -port 3457
     environment:
