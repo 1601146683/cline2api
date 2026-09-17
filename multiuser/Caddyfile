@@ -1,0 +1,44 @@
+# 自动 HTTPS 反代（把 8080 换成 https://api.example.com）
+# 用法: 改这里的域名 -> caddy run --config Caddyfile
+#   gateway 绑 127.0.0.1:8080 时（见 docker-compose.override.example.yml）
+#
+# 要点：
+#   1) flush_interval -1 —— SSE 必须实时下发，否则流式响应会被攒着
+#   2) 不要开 request_buffering，长请求（大 prompt / 长生成）会拖爆内存
+#   3) 客户端 IP 透传用 X-Forwarded-For，网关已按它记账
+
+api.example.com {
+	encode zstd gzip
+
+	reverse_proxy 127.0.0.1:8080 {
+		flush_interval -1
+		transport http {
+			read_timeout 15m
+			write_timeout 15m
+		}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/cline2api.log {
+			roll_size 50mb
+			roll_keep 5
+		}
+	}
+}
+
+# 上游管理后台单独走一个只对你自己 IP 开放的域名（可选）
+admin.example.com {
+	@me remote_ip 203.0.113.7   # 换成你的办公/家庭出口 IP
+	handle @me {
+		reverse_proxy 127.0.0.1:3457
+	}
+	handle {
+		respond 403
+	}
+}

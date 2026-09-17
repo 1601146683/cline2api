@@ -1,0 +1,36 @@
+# ============================================================================
+# 上游 cline2api 构建用 Dockerfile（与官方 Dockerfile 的差异只有两处）
+#   1) 加 ENV GOPROXY —— 默认走 goproxy.cn，受限网络也能拉 Go 模块
+#   2) 去掉 VOLUME ["/app/data"] —— 该声明会生成匿名卷，跟宿主机数据目录打架
+# 其余（基础镜像、构建参数、构建命令、最终镜像结构）与上游保持一致。
+#
+# 存放位置：prepare.sh 会把它复制到 ./upstream/Dockerfile.gw
+# 想完全用官方文件：.env 里设 UPSTREAM_DOCKERFILE=Dockerfile
+# ============================================================================
+
+FROM golang:1.26-alpine AS builder
+
+# 受限网络下 proxy.golang.org 常不可达；goproxy.cn 全球可用，direct 兜底
+ARG GOPROXY=https://goproxy.cn,direct
+ENV GOPROXY=${GOPROXY}
+
+WORKDIR /build
+COPY go.mod ./
+RUN go mod download 2>/dev/null || true
+COPY . .
+ARG APP_VERSION=dev
+RUN CGO_ENABLED=0 go build -ldflags="-s -w -X main.appVersion=${APP_VERSION}" -o cline-proxy .
+
+FROM alpine:3.21
+
+RUN apk add --no-cache ca-certificates tzdata
+WORKDIR /app
+COPY --from=builder /build/cline-proxy .
+
+EXPOSE 3457
+
+ENV PORT=3457
+ENV CLINE_PROXY_HOST=0.0.0.0
+
+ENTRYPOINT ["/app/cline-proxy"]
+CMD ["-host", "0.0.0.0", "-port", "3457"]

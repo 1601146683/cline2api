@@ -1,0 +1,54 @@
+# 送给"不用 compose、想裸机跑网关"的人：网关用 systemd + 上游用 docker
+#
+# 安装步骤（假设仓库已克隆到 /opt/cline2api）:
+#   git clone https://github.com/luawei1/cline2api.git /opt/cline2api
+#   sudo useradd -r -s /usr/sbin/nologin cline        # 建议用专用用户跑
+#   sudo chown -R cline:cline /opt/cline2api/multiuser/data
+#   sudo cp /opt/cline2api/multiuser/systemd/cline2api.service /etc/systemd/system/
+#   sudo vi /etc/systemd/system/cline2api.service     # 填 UPSTREAM_KEY / ADMIN_TOKEN
+#   sudo systemctl daemon-reload && sudo systemctl enable --now cline2api
+# 日志: journalctl -u cline2api -f
+#
+# 注意：路径按 /opt/cline2api/multiuser 布局写；换目录记得同步改下面所有路径。
+
+[Unit]
+Description=Cline2API multi-user gateway (host-run) + upstream via docker
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+# 网关的 CLI（user/key/usage）默认在 cwd 找 gateway.db，所以 cwd 指向 multiuser
+WorkingDirectory=/opt/cline2api/multiuser
+Environment=UPSTREAM=http://127.0.0.1:3457
+Environment=UPSTREAM_KEY=replace-with-upstream-key
+Environment=DB_PATH=/opt/cline2api/data/gateway.db
+Environment=AUTH_MODE=key
+Environment=ADMIN_TOKEN=replace-with-admin-token
+Environment=TZ=Asia/Shanghai
+Environment=PYTHONUNBUFFERED=1
+# 上游用 docker 起（只绑回环，数据挂 /data + working_dir=/data）
+ExecStartPre=-/usr/bin/docker rm -f cline-upstream
+ExecStartPre=/usr/bin/docker run -d --name cline-upstream --restart unless-stopped \
+  -p 127.0.0.1:3457:3457 -w /data \
+  -v /opt/cline2api/multiuser/data/upstream:/data \
+  cline2api-upstream:local
+ExecStart=/usr/bin/python3 /opt/cline2api/multiuser/gateway/gateway.py \
+  serve --host 127.0.0.1 --port 8080 --wait-upstream 90
+Restart=always
+RestartSec=5
+
+# 基本加固（使用非 root 专用用户）
+User=cline
+Group=cline
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# docker socket 需要能访问；如用 rootless docker 则删掉这行
+SupplementaryGroups=docker
+ReadWritePaths=/opt/cline2api/multiuser/data
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,104 @@
+# ============================================================================
+# Cline2API 多人公网部署栈 / multi-user public deployment
+# ----------------------------------------------------------------------------
+# 放在仓库的 multiuser/ 子目录里，不碰上游任何文件（git pull 永远干净）。
+# 构建上下文是仓库根目录，所以直接复用上游源码，不需要再拉一份。
+#
+# 端口规划（关键：上游 3457 只绑回环，公网只暴露网关 8080）
+#   127.0.0.1:3457  cline-proxy 管理后台 + 上游 API（仅宿主机可达）
+#   0.0.0.0:8080    gateway 多用户网关（用户唯一入口，带 Key 鉴权）
+#
+# 用法（在本目录 multiuser/ 下执行）:
+#   cp .env.example .env && vi .env      # 设 ADMIN_PASSWORD / UPSTREAM_KEY / ADMIN_TOKEN
+#   docker compose up -d --build
+#   docker compose logs -f gateway
+#   docker compose exec gateway python gateway.py user add alice --rpm 60 --key
+#   TEST_KEY=xk-... ./verify-stack.sh
+# ============================================================================
+
+services:
+  cline-proxy:
+    build:
+      # 仓库根 = 上游源码所在
+      context: ..
+      # 与根目录 Dockerfile 的差异：+GOPROXY（受限网络拉不到 proxy.golang.org），
+      # 去掉 VOLUME ["/app/data"]（匿名卷会和下面的宿主机目录打架）。
+      # 想完全用上游原文件：.env 里设 UPSTREAM_DOCKERFILE=Dockerfile
+      dockerfile: multiuser/upstream/${UPSTREAM_DOCKERFILE:-Dockerfile.gw}
+      args:
+        APP_VERSION: ${APP_VERSION:-local}
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
+    image: cline2api-upstream:${APP_VERSION:-local}
+    container_name: cline-upstream
+    restart: unless-stopped
+    # 只绑回环：公网碰不到后台，也不会被扫到 3457
+    ports:
+      - "127.0.0.1:${UPSTREAM_HOST_PORT:-3457}:3457"
+    volumes:
+      # 数据目录挂在 /data（不是 /app！）。原因：
+      #   1) 挂 /app 会把镜像里的 cline-proxy 二进制整个盖掉
+      #   2) 上游日志用 tmp+rename 落盘，rename 到"文件级挂载点"会 EBUSY，必须挂目录
+      # 配合下面 working_dir: /data + 启动时补齐空文件，
+      # 让 resolveDataPath()（exe目录 -> cwd -> ~/.cline2api）稳定命中 cwd=/data
+      - ./data/upstream:/data
+    working_dir: /data
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        mkdir -p /data
+        for f in .cline-accounts.json .cline-request-logs.json .cline-config.json .cline-zen.json .cline-credentials.json override.md; do
+          [ -e "/data/$f" ] || : > "/data/$f"
+        done
+        exec /app/cline-proxy -host 0.0.0.0 -port 3457
+    environment:
+      - PORT=3457
+      - CLINE_PROXY_HOST=0.0.0.0
+      - TZ=${TZ:-Asia/Shanghai}
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    healthcheck:
+      # 上游镜像基于 alpine，用容器自带 wget（勿改 debian slim，镜像里没有 wget）
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3457/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  gateway:
+    build:
+      context: ./gateway
+    image: cline2api-gateway:${APP_VERSION:-local}
+    container_name: cline-gateway
+    restart: unless-stopped
+    depends_on:
+      cline-proxy:
+        condition: service_healthy
+    # 网关可以安全暴露公网：没有 Key 一律 401
+    ports:
+      - "${GATEWAY_BIND:-0.0.0.0}:${GATEWAY_PORT:-8080}:8080"
+    volumes:
+      - ./data/gateway:/data
+    environment:
+      - UPSTREAM=http://cline-proxy:3457
+      - UPSTREAM_KEY=${UPSTREAM_KEY:-}
+      - DB_PATH=/data/gateway.db
+      - AUTH_MODE=${AUTH_MODE:-auto}
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-}
+      - MAX_BODY_MB=${MAX_BODY_MB:-32}
+      - UPSTREAM_TIMEOUT=${UPSTREAM_TIMEOUT:-600}
+      - TZ=${TZ:-Asia/Shanghai}
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=3).status==200 else 1)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s

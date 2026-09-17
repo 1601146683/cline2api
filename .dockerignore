@@ -1,0 +1,61 @@
+# ============================================================================
+# 本文件属于 multiuser/ 多人部署层（上游仓库原本没有 .dockerignore）。
+#
+# 为什么必须放在仓库根：
+#   multiuser/docker-compose.yml 的上游构建上下文是仓库根（context: ..），
+#   而上游 Dockerfile 里有 `COPY . .`。没有这个文件的话，
+#   multiuser/data/upstream/.cline-accounts.json（明文 refreshToken）
+#   会被打进构建上下文和 builder 层缓存。
+#
+# 如果你只用上游原生方式（根目录 docker build .）而不用 multiuser/，
+#   删掉本文件即可，不影响上游功能。
+#
+# 若未来上游自己加了 .dockerignore，git pull 会报
+#   "untracked working tree file '.dockerignore' would be overwritten"
+# 处理：先删掉本文件再 pull（上游版本会包含 multiuser/ 的排除规则就无需本文件）。
+# ============================================================================
+
+# ---- 运行数据 & 凭据（最重要）----
+# 注意：dockerignore 的 `*` 不跨 `/`，所以必须把 multiuser/ 下的路径显式写出来，
+# 不能只写根级 `.env` / `*.db`。
+multiuser/data/
+multiuser/.env
+.env
+**/.env
+
+.cline-accounts.json
+.cline-credentials.json
+.cline-request-logs.json
+.cline-config.json
+.cline-zen.json
+**/.cline-accounts.json
+**/.cline-credentials.json
+**/.cline-request-logs.json
+
+*.db
+*.db-wal
+*.db-shm
+**/*.db
+**/*.db-wal
+**/*.db-shm
+
+# ---- 版本控制 & CI ----
+.git
+.github
+
+# ---- 构建产物 / 缓存 ----
+desktop/build
+desktop/dist
+frontend/wailsjs
+build/bin
+cline-proxy
+cline-proxy.exe
+cline-proxy.exe~
+cline-desktop
+cline-desktop.exe
+cline-proxy-desktop*.exe
+**/__pycache__
+
+# ---- 文档（不需要进镜像）----
+multiuser/DEPLOY.md
+multiuser/README.md

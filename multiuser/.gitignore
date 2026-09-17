@@ -1,0 +1,17 @@
+# 运行数据：账号明文 refreshToken 就在这里，绝不能进 Git
+data/
+
+# 环境变量（含 ADMIN_PASSWORD / UPSTREAM_KEY / ADMIN_TOKEN）
+.env
+docker-compose.override.yml
+
+# 注意：不要忽略 multiuser/upstream/ —— 里面的 Dockerfile.gw 是构建所必需的
+# （docker-compose.yml 里 dockerfile 指向它）。曾经这里有个 `upstream/` 规则，
+# 会把 Dockerfile.gw 一起忽略掉，导致 clone 下来构建直接失败。
+# 若你想在本目录另拉一份上游源码用于对比，请用更精确的规则，例如：
+#   /upstream-src/
+
+# 本地构建/运行产物
+*.db
+*.db-wal
+*.db-shm

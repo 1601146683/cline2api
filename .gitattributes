@@ -1,0 +1,51 @@
+# ============================================================================
+# 本文件属于 multiuser/ 多人部署层（上游仓库原本没有 .gitattributes）。
+#
+# 为什么需要：Git for Windows 默认 core.autocrlf=true，会把文本文件在
+# 检出时转成 CRLF。multiuser/ 里的 shell 脚本、Dockerfile、systemd unit
+# 一旦带上 CRLF，拷到 Linux 上会直接崩：
+#     /bin/bash^M: bad interpreter: No such file or directory
+#     或者 docker build 时 RUN 里的续行符失效
+# 这里按文件类型分别锁死行尾符，无论谁在哪台机器克隆都一致。
+# ============================================================================
+
+# ---- 默认：自动判断文本，检出用系统行尾（上游现有行为，不动）----
+* text=auto
+
+# ---- Shell 脚本：必须是 LF，否则 Linux 上无法执行 ----
+*.sh            text eol=lf
+*.bash          text eol=lf
+*.zsh           text eol=lf
+
+# ---- 容器 / 服务定义：必须是 LF ----
+Dockerfile      text eol=lf
+Dockerfile.*    text eol=lf
+*.dockerfile    text eol=lf
+.dockerignore   text eol=lf
+.gitignore      text eol=lf
+.gitattributes  text eol=lf
+.env.example    text eol=lf
+
+# ---- 配置 / 编排 ----
+*.yml           text eol=lf
+*.yaml          text eol=lf
+Caddyfile       text eol=lf
+*.service       text eol=lf
+*.timer         text eol=lf
+
+# ---- Python ----
+*.py            text eol=lf
+
+# ---- Go / Markdown / JSON：常规文本 ----
+*.go            text
+*.md            text
+*.json          text
+
+# ---- 二进制：不做任何转换 ----
+*.exe           binary
+*.dll           binary
+*.so            binary
+*.syso          binary
+*.png           binary
+*.ico           binary
+*.zip           binary
